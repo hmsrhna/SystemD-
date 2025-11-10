@@ -97,6 +97,16 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
     private int foodWidth;
     private int foodHeight;
 
+    // Knife Feature Variables
+    private Image knifeImage;
+    private Image pacmanUpKnifeImage;
+    private Image pacmanDownKnifeImage;
+    private Image pacmanLeftKnifeImage;
+    private Image pacmanRightKnifeImage;
+    private HashSet<Block> knives;
+    private boolean hasWeapon = false;
+    private int knifeCount = 0;
+
     //X = wall, O = skip, P = pac man, ' ' = food
     //Ghosts: b = blue, o = orange, p = pink, r = red
     private String[] tileMap = {
@@ -161,6 +171,13 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
         pacmanLeftImage = new ImageIcon(getClass().getResource("/pacmanLeft.png")).getImage();
         pacmanRightImage = new ImageIcon(getClass().getResource("/pacmanRight.png")).getImage();
 
+        // Load knife images
+        knifeImage = new ImageIcon(getClass().getResource("/knife.png")).getImage();
+        pacmanUpKnifeImage = new ImageIcon(getClass().getResource("/pacmanUp-with-knife.png")).getImage();
+        pacmanDownKnifeImage = new ImageIcon(getClass().getResource("/pacmanDown-with-knife.png")).getImage();
+        pacmanLeftKnifeImage = new ImageIcon(getClass().getResource("/pacmanLeft-with-knife.png")).getImage();
+        pacmanRightKnifeImage = new ImageIcon(getClass().getResource("/pacmanRight-with-knife.png")).getImage();
+
         ImageIcon foodIcon = new ImageIcon(getClass().getResource(FOOD_IMAGE_RESOURCE));
         foodImage = foodIcon.getImage();
         foodWidth = foodIcon.getIconWidth();
@@ -180,6 +197,8 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
 
 
         loadMap();
+        spawnKnives(3); // spawn 3 knives on the map
+
         for (Block ghost : ghosts) {
             char newDirection = directions[random.nextInt(4)];
             ghost.updateDirection(newDirection);
@@ -254,6 +273,31 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
         }
     }
 
+    public void spawnKnives(int count) {
+        knives = new HashSet<>();
+
+        // Convert foods HashSet to array for random selection
+        Block[] foodArray = foods.toArray(new Block[0]);
+
+        // If fewer foods than requested knives, limit the count
+        count = Math.min(count, foodArray.length);
+
+        int created = 0;
+        while (created < count) {
+            int index = random.nextInt(foodArray.length);
+            Block chosenFood = foodArray[index];
+
+            // Only replace if it still exists in foods (not already replaced)
+            if (foods.contains(chosenFood)) {
+                // Create a knife exactly where the food was
+                Block knife = new Block(knifeImage, chosenFood.x, chosenFood.y, tileSize / 2, tileSize / 2);
+                knives.add(knife);
+                foods.remove(chosenFood);
+                created++;
+            }
+        }
+    }
+
     public void paintComponent(Graphics g) {
         super.paintComponent(g);
         draw(g);
@@ -268,6 +312,11 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
         for (Block food : foods) {
             g.drawImage(food.image, food.x, food.y, food.width, food.height, null);
         }
+
+        for (Block knife : knives) {
+            g.drawImage(knife.image, knife.x, knife.y, knife.width, knife.height, null);
+        }
+
         for (Block ghost : ghosts){
             g.drawImage(ghost.image, ghost.x, ghost.y, ghost.width, ghost.height, null);
         }
@@ -281,15 +330,16 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
             g.drawString("Game Over: " + String.valueOf(score), tileSize/2, tileSize/2);
         }
         else{
-            g.drawString("x" + String.valueOf(lives) + " Score: " + String.valueOf(score), tileSize/2, tileSize/2);
+            g.drawString("x" + lives + " Score: " + score + " Knives: " + knifeCount, tileSize/2, tileSize/2);
         }
     }
 
     public void move() {
+        // Move Pac-Man
         pacman.x += pacman.velocityX;
         pacman.y += pacman.velocityY;
 
-        //check wall collisions
+        // Wall/frame checks for Pac-Man
         for (Block wall : walls) {
             if (collision(pacman, wall)) {
                 pacman.x -= pacman.velocityX;
@@ -297,36 +347,75 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
                 break;
             }
         }
+        // Frame checks
+        if (pacman.x < 0) pacman.x = 0;
+        if (pacman.y < 0) pacman.y = 0;
+        if (pacman.x + pacman.width > boardWidth) pacman.x = boardWidth - pacman.width;
+        if (pacman.y + pacman.height > boardHeight) pacman.y = boardHeight - pacman.height;
 
-        //check ghost collisions
+        // --- Ghost collision (with knife logic) ---
+        Block ghostToRemove = null;
         for (Block ghost : ghosts) {
             if (collision(ghost, pacman)) {
-                lives -= 1;
-                if (soundManager != null) {
-                    soundManager.playEffect(LIFE_LOST_SOUND);
-                }
-                if (lives == 0) {
-                    gameOver = true;
-                    return;
-                }
-                resetPositions();
-            }
-
-            if (ghost.y == tileSize*9 && ghost.direction != 'U' && ghost.direction != 'D') {
-                ghost.updateDirection('U');
-            }
-            ghost.x += ghost.velocityX;
-            ghost.y += ghost.velocityY;
-            for (Block wall : walls) {
-                if (collision(ghost, wall) || ghost.x <= 0 || ghost.x + ghost.width >= boardWidth) {
-                    ghost.x -= ghost.velocityX;
-                    ghost.y -= ghost.velocityY;
-                    char newDirection = directions[random.nextInt(4)];
-                    ghost.updateDirection(newDirection);
+                if (hasWeapon && knifeCount > 0) {
+                    knifeCount--;
+                    ghostToRemove = ghost;
+                    if (knifeCount == 0) {
+                        hasWeapon = false;
+                        updatePacmanImage();
+                    }
+                    break; // Only handle 1 collision per tick
+                } else {
+                    lives -= 1;
+                    if (soundManager != null) soundManager.playEffect(LIFE_LOST_SOUND);
+                    if (lives == 0) {
+                        gameOver = true;
+                        return; // End game, stop updating
+                    }
+                    resetPositions();
+                    return; // Immediately exit move(), so Pac-Man resets at center
                 }
             }
         }
-        //check food collision
+        if (ghostToRemove != null) ghosts.remove(ghostToRemove);
+
+        // Move ghosts (do this after handling Pac-Man collision)
+        for (Block ghost : ghosts) {
+            ghost.x += ghost.velocityX;
+            ghost.y += ghost.velocityY;
+            boolean collided = false;
+            // Walls
+            for (Block wall : walls) {
+                if (collision(ghost, wall)) {
+                    ghost.x -= ghost.velocityX;
+                    ghost.y -= ghost.velocityY;
+                    collided = true;
+                    break;
+                }
+            }
+            // Frame checks
+            if (ghost.x < 0) {
+                ghost.x = 0;
+                collided = true;
+            } else if (ghost.x + ghost.width > boardWidth) {
+                ghost.x = boardWidth - ghost.width;
+                collided = true;
+            }
+            if (ghost.y < 0) {
+                ghost.y = 0;
+                collided = true;
+            } else if (ghost.y + ghost.height > boardHeight) {
+                ghost.y = boardHeight - ghost.height;
+                collided = true;
+            }
+
+            if (collided) {
+                char newDirection = directions[random.nextInt(directions.length)];
+                ghost.updateDirection(newDirection);
+            }
+        }
+
+        // Food check as before...
         Block foodEaten = null;
         for (Block food : foods) {
             if (collision(pacman, food)) {
@@ -337,11 +426,26 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
                 }
             }
         }
-        foods.remove(foodEaten);
+        if (foodEaten != null) foods.remove(foodEaten);
+
+        // Knife pickup as before...
+        Block knifeCollected = null;
+        for (Block knife : knives) {
+            if (collision(pacman, knife)) {
+                knifeCollected = knife;
+                hasWeapon = true;
+                knifeCount++;
+                updatePacmanImage();
+            }
+        }
+        if (knifeCollected != null) knives.remove(knifeCollected);
+
+        // Food collection cleanup (handled above)
 
         if (foods.isEmpty()) {
             loadMap();
             resetPositions();
+            spawnKnives(3);
         }
     }
     public boolean collision(Block a, Block b) {
@@ -349,16 +453,63 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
                 a.x + a.width > b.x &&
                 a.y < b.y + b.height &&
                 a.y + a.height > b.y;
-    }
+        }
 
     public void resetPositions() {
         pacman.reset();
         pacman.velocityX = 0;
         pacman.velocityY = 0;
+        pacman.direction = 'R';
+        updatePacmanImage();
+
+        // Re-load ghosts to their original state/positions
+        ghosts.clear();
+        for (int r = 0 ; r < rowCount ; r++) {
+            for (int c = 0 ; c < columnCount ; c++) {
+                String row = tileMap[r];
+                char tileMapChar = row.charAt(c);
+
+                int x = c * tileSize;
+                int y = r * tileSize;
+
+                if (tileMapChar == 'b') {
+                    Block ghost = new Block(blueGhostImage, x, y, tileSize, tileSize);
+                    ghosts.add(ghost);
+                } else if (tileMapChar == 'o') {
+                    Block ghost = new Block(orangeGhostImage, x, y, tileSize, tileSize);
+                    ghosts.add(ghost);
+                } else if (tileMapChar == 'p') {
+                    Block ghost = new Block(pinkGhostImage, x, y, tileSize, tileSize);
+                    ghosts.add(ghost);
+                } else if (tileMapChar == 'r') {
+                    Block ghost = new Block(redGhostImage, x, y, tileSize, tileSize);
+                    ghosts.add(ghost);
+                }
+            }
+        }
+
+        // Give ghosts random directions
         for (Block ghost : ghosts) {
-            ghost.reset();
             char newDirection = directions[random.nextInt(4)];
             ghost.updateDirection(newDirection);
+        }
+
+        spawnKnives(3); // (if you want knives to respawn as well)
+    }
+
+    private void updatePacmanImage() {
+        if (hasWeapon && knifeCount > 0) {
+            // assign to with-knife sprite based on direction
+            if (pacman.direction == 'U') pacman.image = pacmanUpKnifeImage;
+            else if (pacman.direction == 'D') pacman.image = pacmanDownKnifeImage;
+            else if (pacman.direction == 'L') pacman.image = pacmanLeftKnifeImage;
+            else if (pacman.direction == 'R') pacman.image = pacmanRightKnifeImage;
+        } else {
+            // assign to normal sprite based on direction
+            if (pacman.direction == 'U') pacman.image = pacmanUpImage;
+            else if (pacman.direction == 'D') pacman.image = pacmanDownImage;
+            else if (pacman.direction == 'L') pacman.image = pacmanLeftImage;
+            else if (pacman.direction == 'R') pacman.image = pacmanRightImage;
         }
     }
 
@@ -382,12 +533,14 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
         if (gameOver) {
             loadMap();
             resetPositions();
+            spawnKnives(3);
+            hasWeapon = false;
+            knifeCount = 0;
             lives = 3;
             score = 0;
             gameOver = false;
             gameLoop.start();
         }
-        // System.out.println("KeyEvent: " + e.getKeyCode());
         boolean moved = false;
         if (e.getKeyCode() == KeyEvent.VK_UP) {
             moved = pacman.updateDirection('U');
@@ -405,20 +558,9 @@ public class PacMan extends JPanel implements ActionListener, KeyListener {
         if (moved && soundManager != null) {
             soundManager.playEffect(MOVE_SOUND);
         }
-
-        if (pacman.direction == 'U') {
-            pacman.image = pacmanUpImage;
-        }
-        else if (pacman.direction == 'D') {
-            pacman.image = pacmanDownImage;
-        }
-        else if (pacman.direction == 'L') {
-            pacman.image = pacmanLeftImage;
-        }
-        else if (pacman.direction == 'R') {
-            pacman.image = pacmanRightImage;
-        }
+        updatePacmanImage();
     }
+
     private Image createWallTexture(boolean[][] wallMatrix, int row, int column) {
         BufferedImage texture = new BufferedImage(tileSize, tileSize, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics2D = texture.createGraphics();
